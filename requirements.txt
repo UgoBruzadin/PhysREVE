@@ -1,0 +1,11 @@
+torch>=1.12
+numpy>=1.23
+scipy>=1.9
+scikit-learn>=1.1
+mne>=1.6
+moabb>=1.0
+tqdm>=4.64
+requests
+matplotlib
+seaborn
+xgboost>=1.7

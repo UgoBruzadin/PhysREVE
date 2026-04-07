@@ -1,0 +1,21 @@
+name: physreve
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - numpy>=1.23
+  - scipy>=1.9
+  - scikit-learn>=1.1
+  - matplotlib
+  - seaborn
+  - tqdm>=4.64
+  - requests
+  - pip:
+      - torch>=1.12
+      - mne>=1.6
+      - moabb>=1.0
+      - xgboost>=1.7
+      - -e .

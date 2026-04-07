@@ -1,6 +1,6 @@
 """
 PhysREVE training routines:
-  run_pretraining, run_finetuning, run_baseline_finetune
+  run_pretraining, run_mae_pretraining, run_finetuning, run_baseline_finetune
 """
 from copy import deepcopy
 
@@ -290,6 +290,107 @@ def run_finetuning(
     if save_path is not None:
         torch.save(model.state_dict(), save_path)
         print(f'Fine-tuned model saved: {save_path}')
+
+    return model, hist
+
+
+def run_mae_pretraining(
+    cfg:       PhysREVEConfig,
+    loader:    DataLoader,
+    L_row:     torch.Tensor,
+    elec_xyz:  torch.Tensor,
+    device:    torch.device,
+    n_epochs:  int   = 30,
+    lr:        float = 3e-4,
+    wd:        float = 1e-4,
+    warmup_epochs: int = 5,
+    save_path: str   = None,
+):
+    """
+    Base-REVE pretraining: MAE loss only, no physics components.
+
+    Identical architecture to PhysREVE but:
+    - Leadfield attention bias alpha frozen at 0 (no physics prior)
+    - No source decoder physics loss (lambda_phys = 0)
+    - No SNR alignment loss (lambda_snr = 0)
+
+    Use for ablation: isolates the contribution of physics components
+    relative to pure MAE pretraining.
+
+    Returns:
+        pretrained_model: PhysREVEPretrainModel (on device)
+        history: dict with keys 'mae', 'total'
+    """
+    n_ch = elec_xyz.shape[0]
+    first_batch = next(iter(loader))
+    T_win = first_batch.shape[-1]
+    n_patches = T_win // cfg.patch_size
+
+    lf_bias = LeadfieldAttentionBias(L_row, cfg).to(device)
+    # Freeze the leadfield bias scale at 0 — no physics prior
+    lf_bias.alpha.data.fill_(0.0)
+    lf_bias.alpha.requires_grad = False
+
+    model = PhysREVEPretrainModel(cfg, lf_bias).to(device)
+
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
+
+    def lr_lambda(epoch):
+        if epoch < warmup_epochs:
+            return epoch / warmup_epochs
+        progress = (epoch - warmup_epochs) / max(n_epochs - warmup_epochs, 1)
+        return 0.5 * (1 + np.cos(np.pi * progress))
+
+    sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda)
+    hist  = {k: [] for k in ('mae', 'total')}
+
+    print(f'Base-REVE pretraining (MAE only) — {count_params(model):,} parameters')
+    print(f'Epochs: {n_epochs}  |  Batches/epoch: {len(loader)}')
+    print('Losses: MAE only (no L_phys, no L_snr, leadfield bias frozen at 0)')
+
+    for epoch in range(1, n_epochs + 1):
+        model.train()
+        ep_mae = 0.0
+        n = 0
+
+        for Xb in loader:
+            Xb  = Xb.to(device)
+            bs  = Xb.shape[0]
+            xyz = _elec_xyz_batch(elec_xyz, bs)
+
+            msk = block_mask(
+                bs, n_ch, n_patches,
+                ratio=cfg.mask_ratio,
+                block_t=cfg.block_t,
+                block_c=cfg.block_c,
+                device=device
+            )
+
+            recon, src_acts, sen_p, patch_enc = model(Xb, xyz, msk)
+
+            from .losses import mae_loss
+            loss = mae_loss(recon, Xb, msk)
+
+            opt.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            opt.step()
+
+            ep_mae += loss.item() * bs
+            n += bs
+
+        sched.step()
+        hist['mae'].append(ep_mae / n)
+        hist['total'].append(ep_mae / n)
+
+        if epoch % 5 == 0 or epoch == 1:
+            print(f'  Ep {epoch:3d}/{n_epochs}  '
+                  f'L_mae={hist["mae"][-1]:.4f}  '
+                  f'lr={sched.get_last_lr()[0]:.2e}')
+
+    if save_path is not None:
+        torch.save(model.state_dict(), save_path)
+        print(f'Base-REVE weights saved: {save_path}')
 
     return model, hist
 
