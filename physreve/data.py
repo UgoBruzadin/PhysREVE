@@ -62,26 +62,36 @@ def make_split_loaders(
     seed:       int   = 42,
 ) -> tuple:
     """
-    Split labeled data into train/val/test and return DataLoaders.
+    Split labeled data into train/val/test DataLoaders using a chronological
+    (temporal) split to avoid leakage between adjacent EEG trials.
+
+    Trial order is preserved: test = first portion, val = next, train = the rest.
+    This ensures no future information leaks into evaluation sets.
 
     Args:
-        X: (n_trials, n_channels, n_times)
+        X: (n_trials, n_channels, n_times) — trials in acquisition order
         y: (n_trials,)
-        train_frac: fraction of data for training
-        val_frac:   fraction for validation (remainder goes to test)
+        train_frac: fraction of data for training (trailing portion)
+        val_frac:   fraction for validation (middle portion)
         batch_size: DataLoader batch size
-        seed:       random seed for reproducible splits
+        seed:       random seed used only to shuffle within the train split
 
     Returns:
         train_loader, val_loader, test_loader
     """
     n = len(X)
-    n_tr = int(train_frac * n)
-    n_v  = int(val_frac * n)
+    test_frac = 1.0 - train_frac - val_frac
+    n_te = int(test_frac * n)
+    n_v  = int(val_frac  * n)
 
+    # Chronological order: [test | val | train]
+    idx_te = np.arange(0,              n_te)
+    idx_v  = np.arange(n_te,           n_te + n_v)
+    idx_tr = np.arange(n_te + n_v,     n)
+
+    # Shuffle only the train split
     rng = np.random.default_rng(seed)
-    idx = rng.permutation(n)
-    idx_tr, idx_v, idx_te = idx[:n_tr], idx[n_tr:n_tr + n_v], idx[n_tr + n_v:]
+    idx_tr = rng.permutation(idx_tr)
 
     train_ds = LabeledEEGDataset(X[idx_tr], y[idx_tr])
     val_ds   = LabeledEEGDataset(X[idx_v],  y[idx_v])
