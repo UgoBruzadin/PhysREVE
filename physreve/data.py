@@ -107,6 +107,7 @@ def make_split_loaders(
 def make_pretrain_loader(
     X: np.ndarray,
     batch_size: int = 16,
+    num_workers: int = 4,
 ) -> DataLoader:
     """
     DataLoader for unlabeled pretraining data.
@@ -114,9 +115,13 @@ def make_pretrain_loader(
     Args:
         X: (n_trials, n_channels, n_times)
         batch_size: DataLoader batch size
+        num_workers: parallel data-loading workers (0 = main process only)
 
     Returns:
         pretrain_loader
     """
     ds = UnlabeledEEGDataset(X)
-    return DataLoader(ds, batch_size=batch_size, shuffle=True, drop_last=True)
+    return DataLoader(
+        ds, batch_size=batch_size, shuffle=True, drop_last=True,
+        num_workers=num_workers, pin_memory=True, persistent_workers=num_workers > 0,
+    )

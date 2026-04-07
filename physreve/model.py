@@ -160,17 +160,19 @@ class PhysREVETransformerLayer(nn.Module):
         attn_mask:  torch.Tensor = None,
     ):
         x_n = self.norm1(x)
-        n_tok = x.shape[1]
-        ch_mask = (ch_indices.unsqueeze(0) >= 0) & (ch_indices.unsqueeze(1) >= 0)
 
         attn_out, _ = self.attn(x_n, x_n, x_n, need_weights=False)
 
-        lf_correction = self.lf_bias.alpha * (
-            self.lf_bias.bias[ch_indices.clamp(0)][:, ch_indices.clamp(0)].unsqueeze(0)
-            * ch_mask.float().unsqueeze(0)
-        ).mean(-1, keepdim=True).expand_as(x_n)
+        if self.lf_bias.alpha.item() != 0.0:
+            ch_mask = (ch_indices.unsqueeze(0) >= 0) & (ch_indices.unsqueeze(1) >= 0)
+            lf_correction = self.lf_bias.alpha * (
+                self.lf_bias.bias[ch_indices.clamp(0)][:, ch_indices.clamp(0)].unsqueeze(0)
+                * ch_mask.float().unsqueeze(0)
+            ).mean(-1, keepdim=True).expand_as(x_n)
+            x = x + attn_out + lf_correction
+        else:
+            x = x + attn_out
 
-        x = x + attn_out + lf_correction
         x = x + self.ff(self.norm2(x))
         return x
 
@@ -262,23 +264,23 @@ class PhysREVEPretrainModel(nn.Module):
           patch_enc:     (B, C*P, d)
         """
         B, C, T = x.shape
-        P = T // self.encoder.patch_embed.patch_size
+        ps = self.encoder.patch_embed.patch_size
+        P = T // ps
 
+        # Zero masked patches — vectorized: expand (B,C,P) → (B,C,T) via repeat_interleave
+        mask_t = mask.repeat_interleave(ps, dim=2)          # (B, C, P*ps)
         x_masked = x.clone()
-        for b in range(B):
-            for c in range(C):
-                for p in range(P):
-                    if mask[b, c, p]:
-                        ps = self.encoder.patch_embed.patch_size
-                        x_masked[b, c, p * ps:(p + 1) * ps] = 0.0
+        x_masked[:, :, :P * ps] = x[:, :, :P * ps].masked_fill(mask_t, 0.0)
 
         cls_out, patch_enc, sen_p, ch_idx = self.encoder(x_masked, elec_xyz)
 
-        patch_enc_dec = patch_enc.clone()
-        mask_flat = mask.reshape(B, C * P)
-        for b in range(B):
-            masked_pos = mask_flat[b].nonzero(as_tuple=True)[0]
-            patch_enc_dec[b, masked_pos] = self.mask_token
+        # Replace masked token positions with mask token — vectorized
+        mask_flat = mask.reshape(B, C * P)                  # (B, C*P) bool
+        patch_enc_dec = torch.where(
+            mask_flat.unsqueeze(-1),
+            self.mask_token.expand(B, C * P, -1),
+            patch_enc,
+        )
 
         dec_out = self.mae_decoder(patch_enc_dec)
         mae_recon_flat = self.mae_head(dec_out)

@@ -68,6 +68,14 @@ Standard EEG models learn `f(y)` directly. PhysREVE learns `f(y)` while simultan
 | **SNR Alignment L_snr** | Pretraining loss | High-SNR patches are similar in source space (from EEGPT) |
 | **Hemispheric Asymmetry L_asym** | Fine-tuning loss | Contralateral ERD during motor imagery |
 
+### Why the Leadfield Bias Works
+
+The figure below shows the full chain: cortical sources → skull → scalp electrodes (Panel 1), the raw leadfield matrix L (Panel 2), and the resulting attention bias B = L_row · L_row^T that PhysREVE adds to attention logits (Panel 3). REVE has no access to any of this structure.
+
+![PhysREVE Leadfield Visualization](physreve_leadfield_vis.png)
+
+> Generate this figure by running `experiments/leadfield_visualization.ipynb`.
+
 ---
 
 ## Training Pipeline

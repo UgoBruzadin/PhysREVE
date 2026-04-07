@@ -18,7 +18,7 @@ from .model import (
     LeadfieldAttentionBias,
     count_params,
 )
-from .losses import pretrain_losses, finetune_losses
+from .losses import pretrain_losses, finetune_losses, mae_loss
 
 
 def _elec_xyz_batch(elec_xyz: torch.Tensor, batch_size: int) -> torch.Tensor:
@@ -368,7 +368,6 @@ def run_mae_pretraining(
 
             recon, src_acts, sen_p, patch_enc = model(Xb, xyz, msk)
 
-            from .losses import mae_loss
             loss = mae_loss(recon, Xb, msk)
 
             opt.zero_grad()
