@@ -4,6 +4,83 @@ All modifications to the notebook and supporting files are documented here in re
 
 ---
 
+## [0.4.0] — 2026-04-07  *(EXP_004)*
+
+### P2 + P5: Cross-subject pretraining and overfitting reduction
+
+**Motivation:** Even after P1, the model still overfits — train hits 100% while val peaks ~44%. Two root causes remain:
+1. **BUG-03**: Pretraining used subject 1 data, the same 403 trials used for fine-tuning. The encoder already "saw" these trials unlabeled, so fine-tuning was nearly just repeating seen data.
+2. **Overfitting**: 24M parameters on ~280 labeled training trials is severely under-constrained. Dropout at 0.1 is too low; the model memorises.
+
+---
+
+#### 1. Cross-subject pretraining — subjects 2–9 pretrain, subject 1 fine-tune
+**Location:** Data loading cell (Cell 22)
+
+```python
+# Before: single-subject load, pretrain and fine-tune on same pool
+X_all, y_str_all, _ = paradigm.get_data(dataset, subjects=[1], ...)
+pretrain_ds = UnlabeledEEGDataset(X_all[idx_tr])   # ← same 282 trials
+finetune_ds = LabeledEEGDataset(X_all[idx_tr], ...) # ← same 282 trials
+
+# After: held-out subjects for pretraining
+X_pretrain_parts = []
+for subj in range(2, 10):
+    X_s, _, _ = paradigm.get_data(dataset, subjects=[subj], ...)
+    X_pretrain_parts.append(X_s)
+X_pretrain = np.concatenate(X_pretrain_parts, axis=0)  # ~3224 trials, 8 subjects
+
+X_s1, y_str_s1, _ = paradigm.get_data(dataset, subjects=[1], ...)
+pretrain_ds = UnlabeledEEGDataset(X_pretrain)   # subjects 2-9, never fine-tuned
+finetune_ds = LabeledEEGDataset(X_s1[idx_tr], ...) # subject 1 only
+```
+
+**Why:** The encoder now learns physics-consistent EEG representations from 8 subjects it will never be fine-tuned on. When subject 1 fine-tuning begins, the encoder is a genuinely general EEG prior rather than a subject-1-specific one. Expected gain: +5–15% accuracy. This also means the pretrain pool is ~8× larger (~3224 vs ~282 trials), giving the physics losses much more signal.
+
+---
+
+#### 2. Dropout increased: 0.1 → 0.2
+**Location:** `PhysREVEConfig` (Cell 5)
+
+```python
+# Before
+dropout      : float = 0.1
+
+# After
+dropout      : float = 0.2      # increased: reduce overfitting (24M params, ~280 train trials)
+```
+
+**Why:** At 24M parameters trained on 280 examples, the model has ~85k parameters per training sample. Dropout at 0.1 drops only 10% of activations — too weak a regulariser. 0.2 is the standard starting point for this parameter-to-data ratio in transformer fine-tuning.
+
+---
+
+#### 3. Label smoothing: 0.0 → 0.1
+**Location:** `finetune_losses()` cross-entropy call (Cell 18)
+
+```python
+# Before
+lce = F.cross_entropy(logits, labels)
+
+# After
+lce = F.cross_entropy(logits, labels, label_smoothing=0.1)
+```
+
+**Why:** Without label smoothing the model is trained to produce logit differences → ∞ for the correct class. On this dataset (4 classes, 25% chance) the soft targets become `[0.033, 0.033, 0.033, 0.9]` instead of `[0, 0, 0, 1]`. This directly penalises overconfident predictions and is one of the most reliable small-model overfitting remedies.
+
+---
+
+### Expected combined effect of v0.4.0
+
+| Change | Primary effect |
+|---|---|
+| Cross-subject pretraining | Better pretrained features; breaks data leakage |
+| Dropout 0.2 | Smaller train–val accuracy gap |
+| Label smoothing 0.1 | Less overconfident logits; better calibration |
+
+Going into this run: train hits 100%, val ~44% (EXP_003 projection). Target: val 48–55%, reduced train–val gap.
+
+---
+
 ## [0.3.0] — 2026-04-07
 
 ### P1 Fix: Asymmetry Loss Collapse (3 changes to `physreve_notebook.ipynb`)
@@ -223,8 +300,8 @@ Ordered by expected impact — see [`physreve_analysis.md §3`](physreve_analysi
 | Priority | Change | Expected Impact |
 |---|---|---|
 | ~~P1~~ | ~~Fix asymmetry loss — add `tanh` clamping, lower initial weight, enable after epoch 10~~ | **Done in v0.3.0** |
-| P2 | Cross-subject pretraining — subjects 2–9 pretrain, subject 1 fine-tune | +5–15% accuracy (BUG-03) |
+| ~~P2~~ | ~~Cross-subject pretraining — subjects 2–9 pretrain, subject 1 fine-tune~~ | **Done in v0.4.0** |
 | P3 | Linear probe diagnostic phase before full fine-tuning | Validates pretrained features |
 | P4 | Anneal `lambda_phys` to 0 over last 30% of fine-tuning | +2–5% stability |
-| P5 | Increase `dropout` 0.1→0.2 + `label_smoothing=0.1` | Reduces overfitting |
+| ~~P5~~ | ~~Increase `dropout` 0.1→0.2 + `label_smoothing=0.1`~~ | **Done in v0.4.0** |
 | P6 | Increase pretrain to 100 epochs with 10-epoch warmup | +2–5% with cross-subject data |
