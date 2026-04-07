@@ -1,0 +1,19 @@
+{
+  "exp_id": "EXP_002",
+  "description": "v0.2.0: lambda_asym 0.08->0.15, lr_enc 3e-5->1e-4, 5-epoch encoder freeze warmup",
+  "timestamp": "2026-04-07T00:00:00",
+  "config": {
+    "lambda_phys": 0.15,
+    "lambda_snr": 0.05,
+    "lambda_asym": 0.15,
+    "patch_size": 50,
+    "dropout": 0.1,
+    "d_model": 256,
+    "n_layers": 12
+  },
+  "results": {
+    "baseline_acc": 0.287,
+    "physreve_acc": 0.379,
+    "improvement": 0.092
+  }
+}
