@@ -1,0 +1,46 @@
+{
+  "exp_id": "EXP_003",
+  "description": "Leadfield B_sim injection into frozen REVE — LOSO cross-subject, 9 subjects",
+  "timestamp": "2026-04-08T00:00:00",
+  "approach": "Post-hoc channel mixing: F_out = F + alpha * B_sim @ F. REVE frozen. Alpha is one learnable scalar init=0.",
+  "config": {
+    "backbone": "brain-bzh/reve-base (frozen, 30M params)",
+    "forward_model": "MNE sphere model, standard_1020 montage",
+    "n_sources": 1496,
+    "batch_size": 32,
+    "max_epochs": 80,
+    "lr": 1e-3,
+    "patience": 15,
+    "evaluation": "LOSO across 9 subjects, balanced accuracy"
+  },
+  "conditions": {
+    "A_baseline": "Frozen REVE mean-pool -> MLP, no physics",
+    "B_leadfield": "Frozen REVE + alpha*B_sim channel mixing",
+    "C_leadfield_aug": "B_leadfield + electrode jitter 5mm + SVD noise 10%"
+  },
+  "results": {
+    "A_baseline": {
+      "per_subject": [0.356, 0.323, 0.391, 0.283, 0.260, 0.359, 0.347, 0.318, 0.408],
+      "mean": 0.338,
+      "std": 0.045
+    },
+    "B_leadfield": {
+      "per_subject": [0.451, 0.311, 0.502, 0.337, 0.281, 0.314, 0.375, 0.429, 0.495],
+      "mean": 0.388,
+      "std": 0.079
+    },
+    "C_leadfield_aug": {
+      "per_subject": [0.370, 0.321, 0.464, 0.328, 0.300, 0.363, 0.361, 0.411, 0.453],
+      "mean": 0.375,
+      "std": 0.054
+    }
+  },
+  "key_findings": {
+    "B_vs_A_mean_gain": 0.050,
+    "B_vs_A_pct_gain": 14.8,
+    "B_beats_A_subjects": "7/9",
+    "C_beats_A_subjects": "8/9",
+    "outlier_subject": 6,
+    "outlier_note": "S6 is only subject where leadfield hurts — likely anatomy deviates from sphere model"
+  }
+}

@@ -38,3 +38,9 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Large HTML exports
+*.html
+
+# Duplicate/draft notebooks
+**/presentation copy.ipynb
