@@ -160,50 +160,88 @@ Motor imagery produces **Event-Related Desynchronisation (ERD)**: a suppression 
 
 ---
 
-## Results (BCI IV 2a — Subject 1, 4-class MI)
+## Results
 
-| Model | Test Accuracy |
-|---|---|
-| Chance | 25.0% |
-| PhysREVE pretrained | 29.9% |
-| Baseline (random init) | 39.1% |
+### Motor Imagery — BCI IV 2a, Subject 1, 4-class (chronological split)
 
-### Ablation — All from pretrained encoder
+| Model | Val Acc | Notes |
+|---|---|---|
+| Chance | 25.0% | — |
+| LDA (band power) | **58.1%** | Best overall |
+| Logistic Regression | 54.7% | |
+| XGBoost | 53.5% | |
+| Random-init (d=256, 6L) | 40.7% | Train=100% — severe overfit |
+| Base REVE (MAE pretrained) | 36.0% | Worse than random-init |
+| PhysREVE (d=256, 6L) | 40.7% | Same as random; physics slows overfit |
+| **Small random-init (d=64, 2L)** | **44.2%** | Best neural result |
 
-| Configuration | Val Accuracy |
-|---|---|
-| CE only (no physics) | 33.3% |
-| L_phys only | 31.0% |
-| L_asym only | 32.2% |
-| Full PhysREVE | **34.5%** |
+**Linear probe (frozen encoder → logistic regression):**
 
-The full physics combination outperforms CE-only, confirming the physics losses work. The pretraining bottleneck (same-subject data, dead SNR loss) explains the gap with the random-init baseline — see [physreve_analysis.md](physreve_analysis.md) for a full root cause analysis and prioritised fix list.
+| Encoder | Val Acc | Δ vs random |
+|---|---|---|
+| Random-init | 34.9% | — |
+| Base REVE | 31.4% | −3.5% |
+| PhysREVE | 36.0% | +1.2% |
 
-![Training results](PhysREVE_results1.png)
+Setup: 404 train / 86 val trials, subjects 2–9 as unlabeled pretraining corpus (4,608 trials).  
+Full analysis: [RESULTS_ANALYSIS.md](RESULTS_ANALYSIS.md) · Notebooks: [quick_wins_notebook.ipynb](quick_wins_notebook.ipynb)
+
+### Seizure Detection — CHB-MIT Patient 01 (binary, AUC-primary)
+
+| Model | Acc | Sensitivity | Specificity | AUC |
+|---|---|---|---|---|
+| LDA | — | — | — | — |
+| LogReg | — | — | — | — |
+| Random-init (d=128, 6L) | — | — | — | — |
+| Base REVE | — | — | — | — |
+| PhysREVE (d=128, 6L) | — | — | — | — |
+| Small random-init (d=64, 2L) | — | — | — | — |
+
+*Results pending — run [quick_wins_seizure_notebook.ipynb](quick_wins_seizure_notebook.ipynb) on Colab.*  
+Note: accuracy is misleading for imbalanced seizure data — AUC and sensitivity are the primary metrics.
 
 ---
 
-## Key Improvements Applied
+## Conclusions
 
-Three changes were applied based on the analysis to improve Phase 2b performance:
+### What works
 
-| Change | Before | After | Rationale |
-|---|---|---|---|
-| `lambda_asym` | 0.08 | **0.15** | Stronger hemispheric ERD prior — the dominant task signal |
-| `lr_enc` | 3e-5 | **1e-4** | Closes the 33× gap; encoder can now adapt to physics constraints |
-| Encoder warmup | None | **5-epoch freeze** | Head orients first; prevents warm-start corruption |
+- **Physics as regularisation:** PhysREVE's physics losses (L_phys, L_snr) slow down overfitting during fine-tuning — train accuracy at epoch 30 is 50% for PhysREVE vs 100% for random-init with identical val accuracy. The constraint is active even when the pretraining representations aren't better.
+- **Small models for small data:** Reducing the architecture from 9.5M → 476K parameters (d=256→64, 6→2 layers) and increasing dropout from 0.1→0.3 gives the best neural result (44.2% vs 40.7%). Architecture size matters more than pretraining strategy when labeled data is scarce.
+- **ML baselines are a real ceiling:** LDA at 58% on band-power features beats every neural model for single-subject MI. This is expected and well-documented in the EEG literature for small-N settings. The baseline is not wrong — the neural models need more data.
+
+### What doesn't work yet
+
+- **MAE pretraining objective is misaligned:** The linear probe shows Base REVE representations are 3.5% *worse* than random for MI decoding. MAE learns class-neutral EEG autocorrelation structure (spectral, spatial) that has to be partially unlearned during fine-tuning. PhysREVE is only +1.2% better than random on a frozen probe.
+- **L_phys and L_snr are not converging:** Both losses plateau or worsen within 5 pretraining epochs. L_phys stays flat (~0.09), L_snr increases (1.4→1.6). The physics constraints are not being meaningfully optimised.
+- **L_asym inverts:** The asymmetry loss reaches −0.98 during fine-tuning — the model learns anti-lateralised activations. This is likely a sign error or index assignment bug in `lh_idx`/`rh_idx`.
+
+### Priority fixes
+
+| Priority | Fix | Expected impact |
+|---|---|---|
+| 1 | **Multi-subject labeled fine-tuning** (subjects 2–9 have labels → 5,184 trials) | Removes the data bottleneck entirely |
+| 2 | **Fix L_asym sign** — check `lh_idx`/`rh_idx` and loss polarity | Enables the hemispheric ERD signal to train correctly |
+| 3 | **Reduce mask ratio** (0.75→0.50) — too aggressive for 22-channel EEG | Lets L_mae converge further; may activate L_snr |
+| 4 | **Increase L_phys weight** (0.15→0.5) | Forces physics constraint to compete with L_mae |
+| 5 | **Task-aligned pretraining** — contrastive loss or pseudo-labels from LDA | Directly aligns pretraining with the classification objective |
 
 ---
 
 ## Roadmap
 
-The analysis identifies three high-priority fixes expected to push accuracy to **45–55%**, competitive with EEGNet baselines:
+Near-term (expected to push MI accuracy to 50–60%, competitive with EEGNet):
 
-1. **Fix patch geometry** — `patch_size` 200→50 (activates the dead SNR loss, fixes block masking)
-2. **Fix asymmetry loss** — add `tanh` clamping to prevent saturation to −1.0
-3. **Cross-subject pretraining** — pretrain on subjects 2–9, fine-tune on subject 1 (~9× more data)
+1. **Multi-subject fine-tuning** — use labeled data from all 9 BCI IV 2a subjects
+2. **Fix L_asym** — correct sign/index so hemispheric ERD trains in the right direction
+3. **Task-aligned pretraining** — contrastive or pseudo-label loss to replace pure MAE
+4. **Cross-dataset** — pretrain on MOABB benchmark (20+ datasets), evaluate zero-shot
 
-See [physreve_analysis.md](physreve_analysis.md) for implementation details and code snippets for all seven recommended modifications.
+Seizure-specific:
+
+1. **Multi-patient pretraining** — CHB-MIT patients 2–20 as pretraining corpus
+2. **Threshold optimisation** — sweep decision threshold for target sensitivity ≥90%
+3. **Temporal context** — sliding-window majority vote across consecutive windows
 
 ---
 
