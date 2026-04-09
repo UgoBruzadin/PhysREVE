@@ -26,9 +26,19 @@ REVE's 30M parameters never change. The only new parameter is `α`.
 
 ---
 
+## The physics prior
+
+![EEG Leadfield — Neural Sources to Electrode Coupling](figures/leadfield_matrix.png)
+
+`B_sim` encodes which electrodes share cortical sources. C3 and C1 share left motor cortex; C4 does not — regardless of the individual subject.
+
+---
+
 ## Results (EXP_003)
 
 *BCI Competition IV 2a — 4-class motor imagery, leave-one-subject-out, 9 subjects. Chance = 0.25.*
+
+![Leadfield Injection Results — LOSO across 9 subjects](figures/results_loso.png)
 
 | Condition | Mean Bal. Acc. | vs Baseline |
 |---|:---:|:---:|
