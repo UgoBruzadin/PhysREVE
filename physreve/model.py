@@ -161,18 +161,18 @@ class PhysREVETransformerLayer(nn.Module):
     ):
         x_n = self.norm1(x)
 
-        attn_out, _ = self.attn(x_n, x_n, x_n, need_weights=False)
-
+        # Build physics-grounded additive bias and inject into attention logits
+        # before softmax — the correct REVE integration (ALiBi-style).
+        lf_bias = self.lf_bias.compute_bias(ch_indices)    # (n_tok, n_tok)
         if self.lf_bias.alpha.item() != 0.0:
-            ch_mask = (ch_indices.unsqueeze(0) >= 0) & (ch_indices.unsqueeze(1) >= 0)
-            lf_correction = self.lf_bias.alpha * (
-                self.lf_bias.bias[ch_indices.clamp(0)][:, ch_indices.clamp(0)].unsqueeze(0)
-                * ch_mask.float().unsqueeze(0)
-            ).mean(-1, keepdim=True).expand_as(x_n)
-            x = x + attn_out + lf_correction
+            effective_mask = lf_bias if attn_mask is None else lf_bias + attn_mask
         else:
-            x = x + attn_out
+            effective_mask = attn_mask
 
+        attn_out, _ = self.attn(x_n, x_n, x_n,
+                                attn_mask=effective_mask,
+                                need_weights=False)
+        x = x + attn_out
         x = x + self.ff(self.norm2(x))
         return x
 

@@ -148,17 +148,19 @@ class LeadfieldAttentionBias(nn.Module):
         self.register_buffer('bias', bias)
         self.alpha = nn.Parameter(torch.tensor(cfg.leadfield_bias_scale))
 
-    def forward(
-        self,
-        attn_logits: torch.Tensor,   # (B*H, n_tok, n_tok)
-        ch_tok_mask: torch.Tensor,   # (n_tok, n_tok) bool
-        ch_indices:  torch.Tensor,   # (n_tok,) int — -1 for CLS
-    ) -> torch.Tensor:
-        n_tok = attn_logits.shape[-1]
-        bias_mat = torch.zeros(n_tok, n_tok, device=attn_logits.device)
-        valid = ch_tok_mask
-        if valid.any():
-            i_idx = ch_indices.clamp(min=0)
-            full_bias = self.bias[i_idx][:, i_idx]
-            bias_mat[valid] = full_bias[valid]
-        return attn_logits + self.alpha * bias_mat.unsqueeze(0)
+    def compute_bias(self, ch_indices: torch.Tensor) -> torch.Tensor:
+        """
+        Compute the (n_tok, n_tok) additive attention bias from the leadfield.
+
+        Pass the result as attn_mask to nn.MultiheadAttention so the physics
+        prior is injected into attention logits *before* softmax — the correct
+        REVE-style integration (analogous to ALiBi positional bias).
+
+        ch_indices: (n_tok,) int — channel index per token (-1 for CLS)
+        Returns:    (n_tok, n_tok) float — alpha * leadfield_similarity,
+                    with CLS-related rows/cols zeroed out.
+        """
+        i_idx = ch_indices.clamp(min=0)
+        bias  = self.bias[i_idx][:, i_idx]                            # (n_tok, n_tok)
+        valid = (ch_indices >= 0).unsqueeze(0) & (ch_indices >= 0).unsqueeze(1)
+        return self.alpha * bias * valid.float()                       # CLS entries → 0

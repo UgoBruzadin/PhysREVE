@@ -32,9 +32,13 @@ def block_mask(
     # Sample enough blocks to reach ~ratio coverage (2.5x accounts for overlap)
     n_blocks = max(int(C * P * ratio / block_size * 2.5), 20)
 
-    # Sample all block origins at once — fully vectorized, no Python loops over B
-    c0 = torch.randint(0, C, (B, n_blocks), device=device)  # (B, n_blocks)
-    t0 = torch.randint(0, P, (B, n_blocks), device=device)  # (B, n_blocks)
+    # Sample origins so a full block always fits — no boundary clamping needed.
+    # Clamping caused silent cell double-writes at edges, shrinking blocks and
+    # making the true mask ratio lower than the target near boundaries.
+    c_max = max(1, C - block_c + 1)
+    p_max = max(1, P - block_t + 1)
+    c0 = torch.randint(0, c_max, (B, n_blocks), device=device)  # (B, n_blocks)
+    t0 = torch.randint(0, p_max, (B, n_blocks), device=device)  # (B, n_blocks)
 
     mask = torch.zeros(B, C, P, dtype=torch.bool, device=device)
     b_idx = torch.arange(B, device=device).unsqueeze(1).expand(B, n_blocks)
@@ -42,8 +46,6 @@ def block_mask(
     # Only block_c * block_t iterations (typically 8) — not B * 5000
     for dc in range(block_c):
         for dt in range(block_t):
-            ci = (c0 + dc).clamp(max=C - 1)
-            ti = (t0 + dt).clamp(max=P - 1)
-            mask[b_idx, ci, ti] = True
+            mask[b_idx, c0 + dc, t0 + dt] = True
 
     return mask
